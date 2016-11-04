@@ -37,6 +37,13 @@ type routeTest struct {
 	shouldRedirect bool              // whether the request should result in a redirect
 }
 
+type routerTest struct {
+	title          string            // title of the test
+	router         *Router            // the route being tested
+	request        *http.Request     // a request to test the router
+	shouldMatch    bool              // whether the request is expected to match the route at all
+}
+
 func TestHost(t *testing.T) {
 	// newRequestHost a new request with a method, url, and host header
 	newRequestHost := func(method, url, host string) *http.Request {
@@ -1022,6 +1029,69 @@ func TestSubRouter(t *testing.T) {
 	for _, test := range tests {
 		testRoute(t, test)
 		testTemplate(t, test)
+	}
+}
+
+func TestIndependentSubRouter(t *testing.T) {
+	r := NewRouter().StrictSlash(true)
+
+	func1 := func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}
+	subrouter := NewRouter().StrictSlash(true)
+	subrouter.HandleFunc("/", func1)
+	subrouter.HandleFunc("/foo", func1)
+	subrouter.HandleFunc("/foo/", func1)
+
+	r.NewRoute().PathPrefix("/sub").Handler(
+		http.StripPrefix("/sub", subrouter),
+	)
+
+	tests := []routerTest{
+		{
+			title: "The independent subrouter matches on root",
+			router:        r,
+			request:      newRequest("GET", "http://localhost/sub/"),
+			shouldMatch:  true,
+		},
+		{
+			title: "The independent subrouter matches on root without slash",
+			router:        r,
+			request:      newRequest("GET", "http://localhost/sub"),
+			shouldMatch:  true,
+		},
+		{
+			title: "The independent subrouter matches on a subroute",
+			router:        r,
+			request:      newRequest("GET", "http://localhost/sub/foo/"),
+			shouldMatch:  true,
+		},
+		{
+			title: "The independent subrouter matches on a subroute without slash",
+			router:        r,
+			request:      newRequest("GET", "http://localhost/sub/foo"),
+			shouldMatch:  true,
+		},
+		{
+			title: "The independent subrouter doesnt match a not defined route",
+			router:        r,
+			request:      newRequest("GET", "http://localhost/sub/bar"),
+			shouldMatch:  false,
+		},
+	}
+
+	for _, test := range tests {
+		res := NewRecorder()
+		r.ServeHTTP(res, test.request)
+		matched := res.Code == http.StatusOK
+		if matched != test.shouldMatch {
+			msg := "Should match"
+			if !test.shouldMatch {
+				msg = "Should not match"
+			}
+			t.Errorf("(%v) %v:\nRouter: %#v\nRequest: %#v\nResponse: %#v\n", test.title, msg, test.router, test.request, res)
+			return
+		}
 	}
 }
 
